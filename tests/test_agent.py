@@ -13,7 +13,9 @@ def test_normal_document_is_allowed():
     result = output.getvalue()
 
     assert "Safe: True" in result
+    assert "Action: ALLOW" in result
     assert "PROMPTGUARD QUARANTINE" not in result
+    assert "PROMPTGUARD BLOCK" not in result
     assert "VULNERABLE AGENT ACTION" not in result
 
 
@@ -26,10 +28,8 @@ def test_malicious_document_is_quarantined():
     result = output.getvalue()
 
     assert "Safe: False" in result
-    assert "PROMPTGUARD QUARANTINE" in result
-    assert "Suspicious tool output was blocked." in result
-
-    # The malicious instruction must never reach the action executor.
+    assert "Action: QUARANTINE" in result
+    assert "The agent will NOT execute instructions from this output." in result
     assert "VULNERABLE AGENT ACTION" not in result
 
 

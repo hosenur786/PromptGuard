@@ -1,6 +1,8 @@
 from agent.tools import lookup_document, execute_action
 from guard.detector import detect_prompt_injection
-
+from guard.quarantine import quarantine_content
+from guard.decision import create_security_decision
+from guard.policy import evaluate_policy, PolicyAction
 
 def run_agent(user_request: str) -> None:
     print("\n" + "=" * 60)
@@ -28,18 +30,50 @@ def run_agent(user_request: str) -> None:
         for reason in detection["reasons"]:
             print(f" - {reason}")
 
-    if not detection["safe"]:
+    policy = evaluate_policy(detection["risk_score"])
+
+    security_decision = create_security_decision(
+        content=tool_output,
+        source="tool_output",
+        safe=detection["safe"],
+        risk_score=detection["risk_score"],
+        detection_reasons=detection["reasons"],
+        policy=policy,
+    )
+
+    print("\nSecurity decision record:")
+    print(security_decision.summary())
+
+    print("\n[5] PromptGuard policy decision:")
+    print(f"Action: {policy.action.value}")
+    print(f"Reason: {policy.reason}")
+
+    if policy.action in (PolicyAction.QUARANTINE, PolicyAction.BLOCK):
+        quarantine_record = quarantine_content(
+            content=tool_output,
+            risk_score=detection["risk_score"],
+            reasons=detection["reasons"],
+        )
+
         print("\n" + "=" * 60)
-        print("🛑 PROMPTGUARD QUARANTINE")
+
+        if policy.action == PolicyAction.BLOCK:
+            print("🛑 PROMPTGUARD BLOCK")
+        else:
+            print("🛑 PROMPTGUARD QUARANTINE")
+
         print("=" * 60)
-        print("Suspicious tool output was blocked.")
         print("The agent will NOT execute instructions from this output.")
+        print()
+        print(quarantine_record.summary())
         print("=" * 60)
+
         return
 
-    print("\n[5] Tool output considered safe.")
+    print("\n[6] Tool output allowed.")
     print("Agent continues normal processing.")
 
+    
     for line in tool_output.splitlines():
         line = line.strip()
 
@@ -47,7 +81,7 @@ def run_agent(user_request: str) -> None:
             action = line[len("ACTION:"):].strip()
             execute_action(action)
 
-    print("\n[6] Agent finished processing.")
+    print("\n[7] Agent finished processing.")
 
 
 if __name__ == "__main__":
