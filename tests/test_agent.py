@@ -127,10 +127,60 @@ def test_invalid_adjudicator_output_fails_closed():
     assert "Action: QUARANTINE" in output
 
 
+
+
+def test_strong_semantic_malicious_content_is_quarantined_after_review():
+    assessment = make_assessment(
+        0.0, 0.214, "STRONG", False, ["Strong semantic signal."]
+    )
+    fake_result = {
+        "label": "MALICIOUS",
+        "valid": True,
+        "reason": "Test result.",
+        "raw_output": "MALICIOUS_DIRECTIVE",
+    }
+
+    with (
+        patch("agent.agent.lookup_document", return_value="Malicious text."),
+        patch("agent.agent.assess_content", return_value=assessment),
+        patch("agent.agent.adjudicate", return_value=fake_result) as mock_adjudicate,
+    ):
+        output = run_captured("malicious")
+
+    assert "Strong semantic signal; invoking Qwen for review" in output
+    assert "Action: QUARANTINE" in output
+    mock_adjudicate.assert_called_once()
+
+
+def test_strong_semantic_safe_content_is_allowed_after_review():
+    assessment = make_assessment(
+        0.0, 0.214, "STRONG", False, ["Strong semantic similarity."]
+    )
+    fake_result = {
+        "label": "SAFE",
+        "valid": True,
+        "reason": "Test result.",
+        "raw_output": "SAFE_DESCRIPTION",
+    }
+
+    with (
+        patch("agent.agent.lookup_document", return_value="Benign documentation."),
+        patch("agent.agent.assess_content", return_value=assessment),
+        patch("agent.agent.adjudicate", return_value=fake_result) as mock_adjudicate,
+    ):
+        output = run_captured("benign")
+
+    assert "Strong semantic signal; invoking Qwen for review" in output
+    assert "Action: ALLOW" in output
+    assert "PROMPTGUARD QUARANTINE" not in output
+    mock_adjudicate.assert_called_once()
+
 if __name__ == "__main__":
     test_normal_content_uses_fast_path()
     test_strong_rule_signal_is_quarantined_without_llm()
     test_ambiguous_malicious_content_is_quarantined()
     test_ambiguous_safe_content_is_allowed()
     test_invalid_adjudicator_output_fails_closed()
+    test_strong_semantic_malicious_content_is_quarantined_after_review()
+    test_strong_semantic_safe_content_is_allowed_after_review()
     print("All agent routing tests passed.")

@@ -39,20 +39,17 @@ def run_agent(user_request: str) -> None:
         final_risk = assessment.rule_risk
         print("Strong rule evidence; Qwen adjudication skipped.")
 
-    # Strong semantic evidence follows a conservative path.
-    elif assessment.semantic_signal == "STRONG":
-        final_risk = max(assessment.rule_risk, QUARANTINE_RISK)
-        reasons.append(
-            "Strong semantic evidence; conservatively quarantined."
-        )
-        print("Strong semantic evidence; Qwen adjudication skipped.")
-
-    # Use Qwen only when evidence is ambiguous or moderately suspicious.
+    # Strong semantic evidence is reviewed by the adjudicator.
+    # Only strong rule evidence bypasses LLM review immediately.
     elif (
-        assessment.rule_risk >= MIN_ADJUDICATOR_RISK
+        assessment.semantic_signal == "STRONG"
+        or assessment.rule_risk >= MIN_ADJUDICATOR_RISK
         or assessment.semantic_margin >= AMBIGUOUS_MARGIN_FLOOR
     ):
-        print("\n[5] Ambiguous content; invoking Qwen adjudicator...")
+        if assessment.semantic_signal == "STRONG":
+            print("\n[5] Strong semantic signal; invoking Qwen for review...")
+        else:
+            print("\n[5] Ambiguous content; invoking Qwen adjudicator...")
         result = adjudicate(tool_output)
 
         print(f"Adjudicator label: {result['label']}")
@@ -74,11 +71,11 @@ def run_agent(user_request: str) -> None:
             )
 
         else:
-            # Qwen may clear ambiguous evidence only.
-            # Strong rule/semantic signals were handled above.
+            # Strong rule evidence bypasses this branch. Semantic
+            # signals have now been reviewed by the adjudicator.
             final_risk = 0.0
             reasons.append(
-                "Qwen classified ambiguous content as safe."
+                "Qwen classified reviewed content as safe."
             )
 
     else:
