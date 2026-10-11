@@ -28,6 +28,12 @@ SUSPICIOUS_PATTERNS = {
         r"\bact\s+as\s+(the\s+)?(administrator|security\s+administrator)\b",
         r"\byou\s+are\s+now\s+the\s+(administrator|security\s+administrator)\b",
     ],
+    "privilege_escalation": [
+        r"\b(?:assume|take on|operate with|continue with|use)\s+"
+        r"(?:(?:unauthorized|unapproved|ungranted)\s+)?"
+        r"(?:administrator|admin|elevated|privileged)\s+"
+        r"(?:permissions?|privileges?|access)\b",
+    ],
     "action_directive": [
         r"^\s*ACTION\s*:",
         r"\bSEND_EMAIL\b",
@@ -91,6 +97,11 @@ def detect_prompt_injection(text: str) -> dict:
 
     if "role_hijacking" in matched_categories:
         reasons.append("Detected suspicious role reassignment.")
+
+    if "privilege_escalation" in matched_categories:
+        reasons.append(
+            "Detected a potentially unauthorized privilege-escalation directive."
+        )
 
     if "action_directive" in matched_categories:
         reasons.append("Detected an explicit action directive.")
