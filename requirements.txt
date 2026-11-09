@@ -1,3 +1,4 @@
 llama-cpp-python==0.3.36
 sentence-transformers
 numpy
+streamlit>=1.65,<2

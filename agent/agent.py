@@ -1,14 +1,8 @@
 from agent.tools import lookup_document
 from guard.adjudicator import adjudicate
 from guard.fusion import assess_content
-from guard.policy import evaluate_policy, PolicyAction
-from guard.quarantine import quarantine_content
-from guard.decision import create_security_decision
-
-
-AMBIGUOUS_MARGIN_FLOOR = -0.02
-MIN_ADJUDICATOR_RISK = 0.50
-QUARANTINE_RISK = 0.75
+from guard.policy import PolicyAction
+from guard.service import analyze_untrusted_content
 
 
 def run_agent(user_request: str) -> None:
@@ -26,95 +20,60 @@ def run_agent(user_request: str) -> None:
     print(tool_output.strip())
 
     print("\n[4] Rule and semantic analysis...")
-    assessment = assess_content(tool_output)
+
+    # Use the shared service while retaining patchable dependencies
+    # for deterministic agent tests.
+    result = analyze_untrusted_content(
+        tool_output,
+        source="tool_output",
+        assessor=assess_content,
+        adjudicator=adjudicate,
+    )
+
+    assessment = result.assessment
+    policy = result.policy
 
     print(f"Rule risk: {assessment.rule_risk:.2f}")
     print(f"Semantic margin: {assessment.semantic_margin:+.3f}")
     print(f"Semantic signal: {assessment.semantic_signal}")
 
-    reasons = list(assessment.reasons)
-
-    # Strong rule evidence cannot be overridden by the LLM.
-    if assessment.strong_rule_signal:
-        final_risk = assessment.rule_risk
+    if result.decision_path == "strong_rule_short_circuit":
         print("Strong rule evidence; Qwen adjudication skipped.")
 
-    # Strong semantic evidence is reviewed by the adjudicator.
-    # Only strong rule evidence bypasses LLM review immediately.
-    elif (
-        assessment.semantic_signal == "STRONG"
-        or assessment.rule_risk >= MIN_ADJUDICATOR_RISK
-        or assessment.semantic_margin >= AMBIGUOUS_MARGIN_FLOOR
-    ):
+    elif result.decision_path == "adjudicator_review":
         if assessment.semantic_signal == "STRONG":
-            print("\n[5] Strong semantic signal; invoking Qwen for review...")
+            print(
+                "\n[5] Strong semantic signal; "
+                "invoking Qwen for review..."
+            )
         else:
-            print("\n[5] Ambiguous content; invoking Qwen adjudicator...")
-        result = adjudicate(tool_output)
-
-        print(f"Adjudicator label: {result['label']}")
-        print(f"Adjudicator valid: {result['valid']}")
-
-        if (
-            not result["valid"]
-            or result["label"] not in ("SAFE", "MALICIOUS")
-        ):
-            final_risk = QUARANTINE_RISK
-            reasons.append(
-                "Invalid adjudicator output; quarantined by default."
+            print(
+                "\n[5] Ambiguous content; "
+                "invoking Qwen adjudicator..."
             )
 
-        elif result["label"] == "MALICIOUS":
-            final_risk = max(assessment.rule_risk, QUARANTINE_RISK)
-            reasons.append(
-                "Qwen adjudicator classified content as malicious."
-            )
-
-        else:
-            # Strong rule evidence bypasses this branch. Semantic
-            # signals have now been reviewed by the adjudicator.
-            final_risk = 0.0
-            reasons.append(
-                "Qwen classified reviewed content as safe."
-            )
+        adjudicator_result = result.adjudicator_result or {}
+        print(f"Adjudicator label: {adjudicator_result.get('label', 'UNKNOWN')}")
+        print(f"Adjudicator valid: {adjudicator_result.get('valid', False)}")
 
     else:
-        # Fast path: no meaningful suspicious signal.
-        final_risk = 0.0
         print("No meaningful risk signal; Qwen adjudication skipped.")
 
-    policy = evaluate_policy(final_risk)
-
-    security_decision = create_security_decision(
-        content=tool_output,
-        source="tool_output",
-        safe=(policy.action == PolicyAction.ALLOW),
-        risk_score=final_risk,
-        detection_reasons=reasons,
-        policy=policy,
-    )
-
     print("\nSecurity decision record:")
-    print(security_decision.summary())
+    print(result.security_decision.summary())
 
     print("\n[6] Policy decision:")
     print(f"Action: {policy.action.value}")
     print(f"Reason: {policy.reason}")
 
-    if policy.action in (PolicyAction.QUARANTINE, PolicyAction.BLOCK):
-        record = quarantine_content(
-            content=tool_output,
-            risk_score=final_risk,
-            reasons=reasons,
-        )
-
+    if result.quarantine_record is not None:
         print("\n" + "=" * 60)
         print(f"PROMPTGUARD {policy.action.value}")
         print("=" * 60)
         print(
             "Retrieved content will not be treated as trusted instructions."
         )
-        print(record.summary())
+        print(result.quarantine_record.summary())
         print("=" * 60)
         return
 
